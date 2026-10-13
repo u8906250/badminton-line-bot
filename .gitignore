@@ -1,0 +1,6 @@
+node_modules/
+.wrangler/
+.dev.vars
+
+# 開發時的工作筆記（含正式環境的內部細節），只留在本機，不放上公開倉庫
+CLAUDE.md

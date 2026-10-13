@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>羽球報名</title>
+<style>
+  :root {
+    --bg: #f4f5f2; --card: #ffffff; --ink: #1d211c; --muted: #6b7068; --line: #e2e4de; --soft: #eef0ea;
+    --accent: #1f7a4d; --accent-ink: #ffffff; --warn: #b4581b; --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151714; --card: #1f221e; --ink: #ecefe8; --muted: #a0a69b; --line: #33372f; --soft: #272a25;
+            --accent: #4fb784; --accent-ink: #0d1a12; --warn: #e39a5f; --danger: #f2827a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, "PingFang TC", "Noto Sans TC", system-ui, sans-serif; }
+  header { padding: 16px 16px 4px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 16px; margin: 4px 0 8px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  nav.tabs { display: flex; gap: 6px; padding: 8px 16px 0; overflow-x: auto; }
+  nav.tabs.second { padding-top: 6px; }
+  nav.tabs button { border-radius: 999px; padding: 6px 14px; white-space: nowrap; }
+  nav.tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  nav.tabs.second button { font-size: 13px; padding: 4px 12px; }
+  nav.tabs.second button.on { background: var(--soft); color: var(--ink); border-color: var(--line); font-weight: 600; }
+  main { padding: 10px 16px 40px; display: grid; gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .when { font-weight: 600; font-size: 16px; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .badge.open { border-color: var(--accent); color: var(--accent); }
+  .badge.cancelled { border-color: var(--danger); color: var(--danger); }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .mine { margin-top: 10px; display: grid; gap: 6px; }
+  .item { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; min-height: 32px; }
+  .item + .item { border-top: 1px solid var(--line); padding-top: 6px; }
+  .state-confirmed { color: var(--accent); font-weight: 600; }
+  .state-waitlist { color: var(--warn); font-weight: 600; }
+  .state-leave { color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button { font: inherit; font-size: 14px; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--line);
+           background: transparent; color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.danger { color: var(--danger); border-color: var(--danger); }
+  button.small { padding: 4px 10px; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
+  button:disabled { opacity: .5; }
+  .list h3 { font-size: 14px; margin: 14px 0 4px; color: var(--muted); }
+  .list ol { margin: 0; padding-left: 22px; }
+  .list ol.names { list-style: none; padding: 0; columns: 2; column-gap: 16px; counter-reset: n; font-size: 14px; }
+  .names li { counter-increment: n; display: flex; gap: 6px; break-inside: avoid; -webkit-column-break-inside: avoid; }
+  .names li::before { content: counter(n); color: var(--muted); min-width: 1.3em; text-align: right; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .lv { margin-left: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .card.quiet { background: transparent; color: var(--muted); padding: 10px 14px 4px; }
+  .soon { font-size: 14px; padding: 8px 0; }
+  .soon + .soon { border-top: 1px solid var(--line); }
+  .soon .item { font-size: 13px; }
+  .quiet .state-confirmed, .quiet .state-waitlist { color: inherit; font-weight: inherit; }
+  form.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  form.grid .full { grid-column: 1 / -1; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  input, select, textarea { font: inherit; font-size: 15px; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+                  border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0; }
+  textarea { resize: vertical; line-height: 1.5; }
+  input[type=checkbox] { width: 20px; height: 20px; padding: 0; accent-color: var(--accent); }
+  .check { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 14px; }
+  .item > .check:last-child { flex-shrink: 0; }
+  .fee { width: 76px; padding: 4px 6px; font-size: 14px; }
+  .total { font-weight: 600; }
+  .amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .big { font-size: 26px; font-weight: 700; line-height: 1.2; }
+  .neg { color: var(--danger); }
+  details > summary { cursor: pointer; color: var(--accent); font-size: 14px; list-style: none; }
+  details[open] > summary { margin-bottom: 10px; }
+  details.fold > summary::after { content: ' ▸'; }
+  details.fold[open] > summary::after { content: ' ▾'; }
+  .note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+  .levels { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink); }
+  .levels th { text-align: left; vertical-align: top; white-space: nowrap; padding: 4px 10px 4px 0; font-weight: 600; }
+  .levels td { padding: 4px 0; }
+  .levels .tier th { color: var(--accent); padding-top: 10px; border-bottom: 1px solid var(--line); }
+  .levels + .hint { margin-top: 8px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .foot { text-align: center; }
+  button.link { border: 0; padding: 6px 10px; color: var(--muted); font-size: 13px; text-decoration: underline; }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 20px; padding: 12px 14px; border-radius: 10px;
+           background: var(--ink); color: var(--bg); font-size: 14px; z-index: 10; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">載入中…</h1>
+  <div class="sub" id="subtitle"></div>
+</header>
+<nav class="tabs" id="tabs" hidden></nav>
+<nav class="tabs second" id="subtabs" hidden></nav>
+<main id="app"></main>
+<div id="toast" hidden></div>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="app.js"></script>
+<script src="admin.js"></script>
+<script>App.start();</script>
+</body>
+</html>

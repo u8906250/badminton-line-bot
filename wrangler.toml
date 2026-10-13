@@ -1,0 +1,33 @@
+name = "badminton-line-bot"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "badminton"
+database_id = "39798b2e-e73e-4d83-b614-5470a6dced3e"
+
+# 每 5 分鐘：補齊未來 4 週場次、推進開放／截止／結束狀態
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+# LINE Login channel 的 Channel ID（用來驗證 LIFF ID token）
+LOGIN_CHANNEL_ID = "2011951985"
+# LIFF app 的 LIFF ID
+LIFF_ID = "2011951985-p393rwDc"
+# LIFF 頁面網址的 origin，例如 https://badminton-liff.pages.dev
+# 填固定網址，不要填部署時印出的 https://<8碼>.xxx.pages.dev（那是單次部署的快照）
+LIFF_ORIGIN = "https://badminton-liff-23g.pages.dev"
+# 開放報名時在群組發通知：目前鎖住不用（對群組推播一次會以群組人數扣每月額度），
+# 改由管理員在群組輸入「名單」或「選單」。要重新開放時取消下面這行的註解再部署，設定頁就會出現開關
+# OPEN_NOTICE = "on"
+# 意見回饋的收件信箱：報名頁最下面的「意見回饋」會寄到這裡；刪掉這行就不開放意見回饋。
+# 寄信用 Resend（https://resend.com）：用這個信箱註冊、建立 API key，再執行 npx wrangler secret put RESEND_API_KEY。
+# 沒有自己的網域時只能寄到註冊 Resend 的那個信箱，所以這裡要填同一個
+FEEDBACK_TO = "u8906250@gmail.com"
+
+# 機密值用 wrangler secret put 設定，不要寫在這裡：
+#   LINE_CHANNEL_SECRET
+#   LINE_CHANNEL_ACCESS_TOKEN
+#   RESEND_API_KEY（意見回饋寄信用；還沒設定時留言會先存著，設定後自動補寄）
