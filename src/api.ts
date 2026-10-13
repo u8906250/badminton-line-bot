@@ -2,13 +2,12 @@
 
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
-import type { Gender, Registration, Session } from './types';
+import type { Gender, Session } from './types';
 import { UserError, isAdmin } from './types';
 import { verifyIdToken } from './line';
-import { getClub, getRole, getSession, upsertUser } from './db';
+import { getClubAndRole, getSession, upsertUser } from './db';
 import * as svc from './service';
 import { pushPromoted } from './notify';
-import { nowIso } from './time';
 import { registerAdminRoutes } from './admin';
 import { gender, level } from './manage';
 import { canViewLedger, ledgerView } from './ledger';
@@ -70,9 +69,8 @@ api.use('*', async (c, next) => {
 });
 
 api.use('/clubs/:clubId/*', async (c, next) => {
-  const club = await getClub(c.env.DB, c.req.param('clubId') ?? '');
+  const { club, role } = await getClubAndRole(c.env.DB, c.req.param('clubId') ?? '', c.get('userId'));
   if (!club) return c.json({ error: '找不到這個球團' }, 404);
-  const role = await getRole(c.env.DB, club.id, c.get('userId'));
   if (!role) return c.json({ error: '你還不是這個球團的成員，請先在群組輸入「選單」' }, 403);
   c.set('club', club);
   c.set('role', role);
@@ -142,44 +140,10 @@ api.post(
 api.get(
   '/clubs/:clubId/sessions',
   handler(async (c) => {
-    const db = c.env.DB;
-    const userId = c.get('userId');
-    const { results } = await db
-      .prepare(`SELECT * FROM sessions WHERE club_id = ? AND end_at > ? AND status <> 'done' ORDER BY start_at LIMIT 8`)
-      .bind(c.get('club').id, nowIso())
-      .all<Session>();
-
-    const sessions = [];
-    for (const s of results) {
-      const counts = await db
-        .prepare(
-          `SELECT COALESCE(SUM(status = 'confirmed'), 0) AS confirmed, COALESCE(SUM(status = 'waitlist'), 0) AS waitlist
-           FROM registrations WHERE session_id = ?`,
-        )
-        .bind(s.id)
-        .first<{ confirmed: number; waitlist: number }>();
-      const { results: mine } = await db
-        .prepare(`SELECT * FROM registrations WHERE session_id = ? AND user_id = ? AND status <> 'cancelled' ORDER BY queued_at, rowid`)
-        .bind(s.id, userId)
-        .all<Registration>();
-      sessions.push({
-        ...sessionDto(s),
-        confirmed: counts?.confirmed ?? 0,
-        waitlist: counts?.waitlist ?? 0,
-        mine: await Promise.all(
-          mine.map(async (r) => ({
-            id: r.id,
-            kind: r.kind,
-            status: r.status,
-            guestName: r.guest_name,
-            position: r.status === 'waitlist' ? await svc.waitlistPosition(db, r) : null,
-          })),
-        ),
-        // 報名中、已截止的場次，報名頁直接展開名單；其他場次點進去才查
-        roster: s.status === 'open' || s.status === 'closed' ? await svc.roster(db, s.club_id, s.id) : null,
-      });
-    }
-    return { sessions };
+    const list = await svc.sessionsOverview(c.env.DB, c.get('club').id, c.get('userId'));
+    return {
+      sessions: list.map((o) => ({ ...sessionDto(o.session), confirmed: o.confirmed, waitlist: o.waitlist, mine: o.mine, roster: o.roster })),
+    };
   }),
 );
 

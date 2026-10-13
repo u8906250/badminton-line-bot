@@ -17,6 +17,15 @@ export async function getRole(db: D1Database, clubId: string, userId: string): P
   return r?.role ?? null;
 }
 
+/** API 的每個請求都要確認「球團在不在、這個人是不是成員」：兩句用一次 batch 送出，少一次資料庫往返。 */
+export async function getClubAndRole(db: D1Database, clubId: string, userId: string): Promise<{ club: Club | null; role: Role | null }> {
+  const [c, r] = await db.batch([
+    db.prepare('SELECT * FROM clubs WHERE id = ?').bind(clubId),
+    db.prepare('SELECT role FROM club_members WHERE club_id = ? AND user_id = ?').bind(clubId, userId),
+  ]);
+  return { club: (c.results[0] as Club | undefined) ?? null, role: (r.results[0] as { role: Role } | undefined)?.role ?? null };
+}
+
 export function getUser(db: D1Database, id: string) {
   return db
     .prepare('SELECT line_user_id, display_name, updated_at FROM users WHERE line_user_id = ?')

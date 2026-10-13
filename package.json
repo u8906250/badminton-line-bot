@@ -9,7 +9,7 @@
     "db:init": "wrangler d1 execute badminton --remote --file=schema.sql",
     "db:init:local": "wrangler d1 execute badminton --local --file=schema.sql",
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/logic.test.mts && tsx test/manage.test.mts && tsx test/ledger.test.mts && tsx test/notify.test.mts && tsx test/feedback.test.mts && tsx test/cron.test.mts"
+    "test": "tsx test/logic.test.mts && tsx test/manage.test.mts && tsx test/ledger.test.mts && tsx test/notify.test.mts && tsx test/feedback.test.mts && tsx test/cron.test.mts && tsx test/overview.test.mts"
   },
   "dependencies": {
     "hono": "^4.6.0"

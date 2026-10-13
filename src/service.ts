@@ -2,7 +2,7 @@
 
 import type { Club, Env, Gender, RegKind, RegStatus, Registration, Session } from './types';
 import { UserError } from './types';
-import { formatLocal, nowIso } from './time';
+import { formatLocal, iso, nowIso } from './time';
 
 export interface Promoted {
   id: string;
@@ -251,21 +251,30 @@ export interface Roster {
   leave: RosterEntry[];
 }
 
-export async function roster(db: D1Database, clubId: string, sessionId: string): Promise<Roster> {
-  const { results } = await db
-    .prepare(
-      `SELECT r.id, r.user_id, r.kind, r.status, r.guest_name, r.level,
-              COALESCE(m.nickname, u.display_name) AS name
-       FROM registrations r
-       JOIN users u ON u.line_user_id = r.user_id
-       LEFT JOIN club_members m ON m.club_id = ? AND m.user_id = r.user_id
-       WHERE r.session_id = ? AND r.status <> 'cancelled'
-       ORDER BY r.queued_at, r.rowid`,
-    )
-    .bind(clubId, sessionId)
-    .all<{ id: string; user_id: string; kind: RegKind; status: RegStatus; guest_name: string | null; level: number | null; name: string }>();
+interface RosterRow {
+  id: string;
+  session_id: string;
+  user_id: string;
+  kind: RegKind;
+  status: RegStatus;
+  guest_name: string | null;
+  level: number | null;
+  name: string;
+}
 
-  const entries: RosterEntry[] = results.map((r) => ({
+/** 名單要的欄位與順序。where 是對 r 的條件；?1 一律是球團 id（用來帶出球團裡的暱稱）。 */
+const rosterSql = (where: string): string =>
+  `SELECT r.id, r.session_id, r.user_id, r.kind, r.status, r.guest_name, r.level,
+          COALESCE(m.nickname, u.display_name) AS name
+   FROM registrations r
+   JOIN users u ON u.line_user_id = r.user_id
+   LEFT JOIN club_members m ON m.club_id = ?1 AND m.user_id = r.user_id
+   WHERE ${where} AND r.status <> 'cancelled'
+   ORDER BY r.queued_at, r.rowid`;
+
+/** 同一場的報名（已依報名先後排好）整理成正取／候補／請假三份名單。 */
+function toRoster(rows: RosterRow[]): Roster {
+  const entries: RosterEntry[] = rows.map((r) => ({
     id: r.id,
     userId: r.user_id,
     name: r.guest_name ? `${r.guest_name}（${r.name} 的朋友）` : r.name,
@@ -283,6 +292,79 @@ export async function roster(db: D1Database, clubId: string, sessionId: string):
     waitlist: entries.filter((e) => e.status === 'waitlist'),
     leave: entries.filter((e) => e.status === 'leave'),
   };
+}
+
+export async function roster(db: D1Database, clubId: string, sessionId: string): Promise<Roster> {
+  const { results } = await db.prepare(rosterSql('r.session_id = ?2')).bind(clubId, sessionId).all<RosterRow>();
+  return toRoster(results);
+}
+
+/** 報名頁上一場要顯示的東西。 */
+export interface SessionOverview {
+  session: Session;
+  confirmed: number;
+  waitlist: number;
+  /** 這個人在這一場的報名（自己和幫朋友報的），依報名先後；position 是候補第幾位，不是候補就是 null */
+  mine: { id: string; kind: RegKind; status: RegStatus; guestName: string | null; position: number | null }[];
+  /** 報名中、已截止的場次直接附上名單；其他場次點進去才查 */
+  roster: Roster | null;
+}
+
+// 報名頁要顯示的場次：還沒結束（包含已截止、已取消）的最近 8 場。?1 球團、?2 開始時間的下限、?3 現在。
+// 下限讓 (club_id, start_at) 的索引直接從最近的場次讀起，不用把歷年的場次都掃過；
+// 一場最長不到一天，所以還沒結束的場次一定是兩天內才開始的。
+const UPCOMING = `FROM sessions WHERE club_id = ?1 AND start_at > ?2 AND end_at > ?3 AND status <> 'done' ORDER BY start_at LIMIT 8`;
+
+/**
+ * 報名頁載入時要的全部資料：場次、各場人數、自己的報名與候補順位、報名中／已截止場次的名單。
+ * 這是最常被呼叫的請求，所以四句 SQL 用一次 batch 送出：只有一次資料庫往返，CPU 也省
+ * （之前是每一場各查三、四次，正式環境量到 9–12 ms，貼著免費方案的 10 ms 上限）。
+ */
+export async function sessionsOverview(db: D1Database, clubId: string, userId: string, now = Date.now()): Promise<SessionOverview[]> {
+  const base = [clubId, iso(now - 2 * 86_400_000), iso(now)];
+  const [ses, cnt, mine, ros] = await db.batch([
+    db.prepare(`SELECT * ${UPCOMING}`).bind(...base),
+    db
+      .prepare(
+        `SELECT session_id, COALESCE(SUM(status = 'confirmed'), 0) AS confirmed, COALESCE(SUM(status = 'waitlist'), 0) AS waitlist
+         FROM registrations WHERE session_id IN (SELECT id ${UPCOMING}) GROUP BY session_id`,
+      )
+      .bind(...base),
+    db
+      .prepare(
+        // 候補順位的算法和 waitlistPosition() 一樣：同一場排在自己前面（含自己）的候補有幾筆
+        `SELECT r.id, r.session_id, r.kind, r.status, r.guest_name,
+                CASE WHEN r.status = 'waitlist' THEN
+                  (SELECT COUNT(*) FROM registrations w
+                   WHERE w.session_id = r.session_id AND w.status = 'waitlist'
+                     AND (w.queued_at < r.queued_at OR (w.queued_at = r.queued_at AND w.rowid <= r.rowid)))
+                END AS position
+         FROM registrations r
+         WHERE r.session_id IN (SELECT id ${UPCOMING}) AND r.user_id = ?4 AND r.status <> 'cancelled'
+         ORDER BY r.queued_at, r.rowid`,
+      )
+      .bind(...base, userId),
+    db.prepare(rosterSql(`r.session_id IN (SELECT id FROM (SELECT id, status ${UPCOMING}) WHERE status IN ('open', 'closed'))`)).bind(...base),
+  ]);
+
+  const group = <T extends { session_id: string }>(rows: T[]): Map<string, T[]> => {
+    const m = new Map<string, T[]>();
+    for (const r of rows) m.set(r.session_id, [...(m.get(r.session_id) ?? []), r]);
+    return m;
+  };
+  type Count = { session_id: string; confirmed: number; waitlist: number };
+  type Mine = { id: string; session_id: string; kind: RegKind; status: RegStatus; guest_name: string | null; position: number | null };
+  const counts = group(cnt.results as Count[]);
+  const mineBy = group(mine.results as Mine[]);
+  const rosterBy = group(ros.results as RosterRow[]);
+
+  return (ses.results as Session[]).map((s) => ({
+    session: s,
+    confirmed: counts.get(s.id)?.[0].confirmed ?? 0,
+    waitlist: counts.get(s.id)?.[0].waitlist ?? 0,
+    mine: (mineBy.get(s.id) ?? []).map((r) => ({ id: r.id, kind: r.kind, status: r.status, guestName: r.guest_name, position: r.position })),
+    roster: s.status === 'open' || s.status === 'closed' ? toRoster(rosterBy.get(s.id) ?? []) : null,
+  }));
 }
 
 /** 成員退出群組：取消他尚未開打的報名，季打改為請假，並處理遞補。 */
