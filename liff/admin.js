@@ -1,4 +1,4 @@
-// 管理員頁面：場次、季打、記帳、時段、成員、設定。只有管理員看得到「管理」分頁。
+// 管理員頁面：場次、季打、抽籤、記帳、時段、成員、設定。只有管理員看得到「管理」分頁。
 // 另外有一個給季打成員的「帳本」分頁：和記帳同一個畫面，但只能看。
 
 (() => {
@@ -20,6 +20,7 @@
   App.subtabs['a-sessions'] = [
     { view: 'a-sessions', label: '場次' },
     { view: 'a-seasons', label: '季打' },
+    { view: 'a-draws', label: '抽籤' },
     { view: 'a-ledger', label: '記帳' },
     { view: 'a-schedules', label: '時段' },
     { view: 'a-members', label: '成員' },
@@ -27,6 +28,7 @@
   ];
   App.parentOf['a-session'] = 'a-sessions';
   App.parentOf['a-attendance'] = 'a-sessions';
+  App.parentOf['a-draw'] = 'a-draws';
 
   // ---------- 場次 ----------
 
@@ -274,6 +276,115 @@
     toast(`已移出${changesText(r)}`);
   };
 
+  // ---------- 抽籤紀錄（例如場地抽籤：誰已經抽了、誰抽中） ----------
+
+  const drawMeta = (d) => dots(`已抽籤 ${d.drawn} 人`, `抽中 ${d.won} 人`, `建立於 ${fmt(d.createdAt)}`);
+
+  App.views['a-draws'] = async () => {
+    const { draws } = await A('/draws');
+    return `
+      <section class="card">
+        <details ${draws.length ? '' : 'open'}>
+          <summary>＋ 新增抽籤紀錄</summary>
+          <form class="grid" data-form="aDrawCreate">
+            ${field('名稱', input('name', '', 'maxlength="30" required placeholder="例如：11 月場地抽籤"'), true)}
+            ${field('備註（可留空）', `<textarea name="note" rows="2" maxlength="200" placeholder="例如：某某國小體育館，週三 20:00–22:00"></textarea>`, true)}
+            <div class="full hint">建立後可以勾選每位成員是否已經抽籤、有沒有抽中，也可以加入不在球團裡的人。</div>
+            <div class="full"><button class="primary" type="submit">建立</button></div>
+          </form>
+        </details>
+      </section>
+      ${draws.map((d) => `
+        <section class="card">
+          <div class="row"><h2>${esc(d.name)}</h2><button class="small" data-act="aDrawOpen" data-id="${esc(d.id)}">打開</button></div>
+          ${d.note ? `<div class="note meta">${esc(d.note)}</div>` : ''}
+          <div class="meta">${drawMeta(d)}</div>
+        </section>`).join('') || '<div class="card empty">還沒有抽籤紀錄</div>'}`;
+  };
+  App.forms.aDrawCreate = async (fd) => {
+    const { draw } = await A('/draws', { name: fd.get('name'), note: fd.get('note') });
+    toast('已建立');
+    App.go('a-draw', { id: draw.id });
+  };
+  App.actions.aDrawOpen = (d) => App.go('a-draw', { id: d.id });
+
+  App.views['a-draw'] = async ({ id }) => {
+    const { draw: d, rows } = await A(`/draws/${enc(id)}`);
+    const box = (r, field, label) => `<label class="check"><input type="checkbox" data-change="aDrawMark" data-id="${esc(d.id)}" data-field="${field}"
+      ${r.kind === 'member' ? `data-uid="${esc(r.userId)}"` : `data-eid="${esc(r.entryId)}"`} ${r[field] ? 'checked' : ''}>${label}</label>`;
+    const row = (r) => `
+      <div class="item"><span>${esc(r.name)}${r.kind === 'left' ? '<span class="hint">（已不在球團）</span>' : ''}</span>
+        <span class="check">
+          ${box(r, 'drawn', '已抽籤')}${box(r, 'won', '抽中')}
+          ${r.kind === 'outside' ? `<button class="small" data-act="aDrawRemove" data-id="${esc(d.id)}" data-eid="${esc(r.entryId)}" data-name="${esc(r.name)}">移除</button>` : ''}
+        </span></div>`;
+    const members = rows.filter((r) => r.kind !== 'outside');
+    const outside = rows.filter((r) => r.kind === 'outside');
+    const notYet = members.filter((r) => !r.drawn && r.kind === 'member');
+    return `
+      <div><button data-act="back" data-view="a-draws">← 返回</button></div>
+      <section class="card">
+        <h2>${esc(d.name)}</h2>
+        ${d.note ? `<div class="note meta">${esc(d.note)}</div>` : ''}
+        <div class="meta">${drawMeta(d)}</div>
+        ${notYet.length ? `<div class="hint" style="margin-top:6px">還沒抽籤的成員（${notYet.length}）：${notYet.map((r) => esc(r.name)).join('、')}</div>` : ''}
+      </section>
+      <section class="card">
+        <h2>成員（${members.length}）</h2>
+        <div class="hint">勾「抽中」會一併勾「已抽籤」；取消「已抽籤」會一併取消「抽中」。</div>
+        <div class="mine">${members.map(row).join('') || '<div class="empty">還沒有成員</div>'}</div>
+      </section>
+      <section class="card">
+        <h2>外面名單（${outside.length}）</h2>
+        <div class="hint">不在球團裡、但這次幫忙抽籤的人。</div>
+        <div class="mine">${outside.map(row).join('') || '<div class="empty">還沒有加入</div>'}</div>
+        <details style="margin-top:12px" ${outside.length ? '' : 'open'}>
+          <summary>＋ 加入外面名單</summary>
+          <form class="grid" data-form="aDrawOutside" data-id="${esc(d.id)}">
+            ${field('名字（一行一個，或用逗號、頓號隔開）', `<textarea name="names" rows="3" required placeholder="例如：&#10;王小明&#10;陳小華"></textarea>`, true)}
+            <label class="full check"><input type="checkbox" name="drawn">加入時直接勾「已抽籤」</label>
+            <div class="full"><button class="primary" type="submit">加入</button></div>
+          </form>
+        </details>
+      </section>
+      <section class="card">
+        <details>
+          <summary>修改名稱或備註</summary>
+          <form class="grid" data-form="aDrawEdit" data-id="${esc(d.id)}">
+            ${field('名稱', input('name', d.name, 'maxlength="30" required'), true)}
+            ${field('備註（可留空）', `<textarea name="note" rows="2" maxlength="200">${esc(d.note ?? '')}</textarea>`, true)}
+            <div class="full"><button type="submit">儲存</button></div>
+          </form>
+        </details>
+        <details style="margin-top:8px">
+          <summary style="color:var(--danger)">刪除這次抽籤紀錄</summary>
+          <div class="hint" style="margin:8px 0">會刪掉這次的所有勾選和外面名單，無法復原。</div>
+          <button class="danger" data-act="aDrawDelete" data-id="${esc(d.id)}" data-name="${esc(d.name)}">刪除</button>
+        </details>
+      </section>`;
+  };
+  App.changes.aDrawMark = (el, d) =>
+    A(`/draws/${enc(d.id)}/mark`, { ...(d.uid ? { userId: d.uid } : { entryId: d.eid }), field: d.field, value: el.checked });
+  App.forms.aDrawOutside = async (fd, d) => {
+    const r = await A(`/draws/${enc(d.id)}/outside`, { names: fd.get('names'), drawn: !!fd.get('drawn') });
+    toast(`已加入 ${r.added.length} 人${r.skipped.length ? `，${r.skipped.join('、')} 已經在名單上` : ''}`);
+  };
+  App.actions.aDrawRemove = async (d) => {
+    if (!confirm(`把 ${d.name} 從外面名單移除？`)) return;
+    await A(`/draws/${enc(d.id)}/outside/${enc(d.eid)}/remove`, {});
+    toast('已移除');
+  };
+  App.forms.aDrawEdit = async (fd, d) => {
+    await A(`/draws/${enc(d.id)}`, { name: fd.get('name'), note: fd.get('note') });
+    toast('已儲存');
+  };
+  App.actions.aDrawDelete = async (d) => {
+    if (!confirm(`刪除「${d.name}」？所有勾選和外面名單都會刪掉，無法復原。`)) return;
+    await A(`/draws/${enc(d.id)}/delete`, {});
+    toast('已刪除');
+    App.go('a-draws');
+  };
+
   // ---------- 記帳 ----------
 
   const LEDGER = { venue: '場地費', shuttle: '羽球費', other_expense: '其他支出', other_income: '其他收入' };
@@ -460,7 +571,7 @@
     return `
       <section class="card">
         <h2>成員（${members.length}）</h2>
-        <div class="hint">在群組輸入過任何訊息的人會自動加入。暱稱會用在名單上。不在 LINE 上的人（例如教練）到「季打」加入。${isOwner() ? '' : '只有擁有者可以設定管理員。'}</div>
+        <div class="hint">群組裡的人傳過訊息（文字、圖片、貼圖都算）、新加入群組、或打開報名頁，就會自動加入；還沒出現的人，把報名頁連結貼在群組請他點一下。暱稱會用在名單上。不在 LINE 上的人（例如教練）到「季打」加入。${isOwner() ? '' : '只有擁有者可以設定管理員。'}</div>
         <div class="mine">${members.map(row).join('')}</div>
       </section>
       ${isOwner() ? `<section class="card">

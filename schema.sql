@@ -156,3 +156,28 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 -- 排程每 5 分鐘找一次還沒寄出的，只索引那幾筆
 CREATE INDEX IF NOT EXISTS idx_feedback_unsent ON feedback (created_at) WHERE emailed_at IS NULL;
+
+-- 抽籤紀錄（例如場地抽籤）：管理員建立一次抽籤，勾選哪些人已經抽籤、誰抽中（src/draws.ts）。
+CREATE TABLE IF NOT EXISTS draws (
+  id TEXT PRIMARY KEY,
+  club_id TEXT NOT NULL REFERENCES clubs(id),
+  name TEXT NOT NULL,
+  note TEXT,                                         -- 備註，例如抽哪個場館、哪個時段；NULL = 沒填
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_draws_club ON draws(club_id, created_at);
+
+-- 一次抽籤裡每個人的紀錄。球團成員只有勾過才會有一筆（id = <drawId>_m_<userId>）；
+-- 不在球團裡的人由管理員手動加入（user_id 為 NULL，名字記在 name）。
+CREATE TABLE IF NOT EXISTS draw_entries (
+  id TEXT PRIMARY KEY,
+  draw_id TEXT NOT NULL REFERENCES draws(id),
+  user_id TEXT REFERENCES users(line_user_id),       -- 球團成員；NULL = 手動加入的外面名單
+  name TEXT,                                         -- 外面名單的名字；成員的名字一律用當下的暱稱／LINE 名稱
+  drawn INTEGER NOT NULL DEFAULT 0,                  -- 已抽籤
+  won INTEGER NOT NULL DEFAULT 0,                    -- 抽中（抽中一定算已抽籤）
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_draw_entries_draw ON draw_entries(draw_id);

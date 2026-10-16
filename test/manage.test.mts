@@ -269,10 +269,18 @@ await ledger.addLedgerEntry(env, club2(), { category: 'venue', amount: 500, date
 await ledger.addLedgerEntry(env, club(), { category: 'shuttle', amount: 800, date: d }, 'U2');
 // c1 再加一位非 LINE 成員，刪球團時要跟著清掉
 const coach1 = await m.addExternalSeasonMember(env, club(), se.id, '一團教練');
-const TABLES = ['club_members', 'schedules', 'seasons', 'season_members', 'sessions', 'registrations', 'ledger_entries'];
+// 兩個球團各有一次抽籤紀錄（成員的勾選＋外面名單）
+const drawsMod = await import(SRC + '/src/draws.ts');
+for (const [c, uid] of [[club(), 'U2'], [club2(), 'U3']] as const) {
+  const dr = await drawsMod.createDraw(env, c, { name: '場地抽籤' }, 'U1');
+  await drawsMod.markDraw(env, c, dr.id, { userId: uid, field: 'won', value: true });
+  await drawsMod.addOutsideEntries(env, c, dr.id, { names: '外面的人' });
+}
+const TABLES = ['club_members', 'schedules', 'seasons', 'season_members', 'sessions', 'registrations', 'ledger_entries', 'draws', 'draw_entries'];
 const rowsOf = (clubId: string) => Object.fromEntries(TABLES.map((t) => [t, q(
   t === 'season_members' ? `SELECT COUNT(*) n FROM season_members WHERE season_id IN (SELECT id FROM seasons WHERE club_id=?)`
   : t === 'registrations' ? `SELECT COUNT(*) n FROM registrations WHERE session_id IN (SELECT id FROM sessions WHERE club_id=?)`
+  : t === 'draw_entries' ? `SELECT COUNT(*) n FROM draw_entries WHERE draw_id IN (SELECT id FROM draws WHERE club_id=?)`
   : `SELECT COUNT(*) n FROM ${t} WHERE club_id=?`, clubId)[0].n]));
 const before1 = rowsOf('c1');
 const before2 = rowsOf('c2');
@@ -286,7 +294,7 @@ await assert.rejects(m.deleteClub(env, club(), 'owner', undefined), isUserError(
 assert.deepEqual(rowsOf('c1'), before1, '沒通過確認就什麼都不刪');
 
 const removed = await m.deleteClub(env, club(), 'owner', ' 測試 ');
-assert.deepEqual({ ...removed }, { members: before1.club_members, schedules: before1.schedules, seasons: before1.seasons, sessions: before1.sessions, registrations: before1.registrations, ledgerEntries: before1.ledger_entries });
+assert.deepEqual({ ...removed }, { members: before1.club_members, schedules: before1.schedules, seasons: before1.seasons, sessions: before1.sessions, registrations: before1.registrations, ledgerEntries: before1.ledger_entries, draws: before1.draws });
 assert.equal(q(`SELECT COUNT(*) n FROM clubs WHERE id='c1'`)[0].n, 0);
 assert.ok(Object.values(rowsOf('c1')).every((n: any) => n === 0), 'c1 的資料全部刪掉');
 assert.deepEqual(rowsOf('c2'), before2, '別的球團原封不動');

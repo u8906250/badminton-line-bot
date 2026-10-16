@@ -178,6 +178,15 @@ interface LineEvent {
   source?: { type: string; groupId?: string; userId?: string };
   message?: { type: string; text?: string };
   left?: { members: { userId: string }[] };
+  joined?: { members: { type?: string; userId?: string }[] };
+}
+
+/** 記下這個人是球團成員（沒綁定的群組不記）。 */
+async function recordMember(env: Env, groupId: string, userId: string): Promise<void> {
+  const club = await getClubByGroup(env.DB, groupId);
+  if (!club) return;
+  await touchUser(env, groupId, userId);
+  await ensureMember(env.DB, club.id, userId);
 }
 
 export async function handleEvent(env: Env, ev: LineEvent): Promise<void> {
@@ -212,9 +221,20 @@ export async function handleEvent(env: Env, ev: LineEvent): Promise<void> {
     return;
   }
 
-  if (ev.type !== 'message' || ev.message?.type !== 'text' || !ev.message.text) return;
+  // 有人加入群組：直接記成成員，不用等他講話，管理員馬上就能把他加進季打
+  if (ev.type === 'memberJoined' && ev.joined) {
+    for (const m of ev.joined.members) if (m.userId) await recordMember(env, groupId, m.userId);
+    return;
+  }
+
+  if (ev.type !== 'message') return;
   const userId = ev.source?.userId;
   if (!userId) return;
+  // 圖片、貼圖、影片、檔案等不是文字的訊息：不是指令，只記錄成員
+  if (ev.message?.type !== 'text' || !ev.message.text) {
+    await recordMember(env, groupId, userId);
+    return;
+  }
 
   const cmd = parseCommand(ev.message.text);
   const club = await getClubByGroup(env.DB, groupId);

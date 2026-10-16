@@ -6,6 +6,7 @@ import { audit } from './db';
 import { type AppEnv, body, handler } from './http';
 import * as m from './manage';
 import * as ledger from './ledger';
+import * as draws from './draws';
 import { cancelSession, roster } from './service';
 import { pushBudget } from './line';
 import { pushChanges, pushText, sessionLabel } from './notify';
@@ -193,6 +194,57 @@ export function registerAdminRoutes(api: Hono<AppEnv>): void {
       const { paid } = await body(c);
       await m.setSeasonFeePaid(c.env, c.get('club'), param(c, 'id'), param(c, 'uid'), !!paid);
       await log(c, 'season.fee', { id: param(c, 'id'), userId: param(c, 'uid'), paid: !!paid });
+    }),
+  );
+
+  // ---- 抽籤紀錄（規則在 draws.ts）----
+  api.get(`${P}/draws`, handler(async (c) => ({ draws: await draws.listDraws(c.env, c.get('club')) })));
+  api.get(`${P}/draws/:id`, handler(async (c) => draws.drawView(c.env, c.get('club'), param(c, 'id'))));
+  api.post(
+    `${P}/draws`,
+    handler(async (c) => {
+      const d = await draws.createDraw(c.env, c.get('club'), await body(c), c.get('userId'));
+      await log(c, 'draw.create', { id: d.id, name: d.name, note: d.note });
+      return { draw: d };
+    }),
+  );
+  api.post(
+    `${P}/draws/:id`,
+    handler(async (c) => {
+      const input = await body(c);
+      await draws.updateDraw(c.env, c.get('club'), param(c, 'id'), input);
+      await log(c, 'draw.update', { id: param(c, 'id'), name: input.name, note: input.note });
+    }),
+  );
+  api.post(
+    `${P}/draws/:id/delete`,
+    handler(async (c) => {
+      const removed = await draws.deleteDraw(c.env, c.get('club'), param(c, 'id'));
+      await log(c, 'draw.delete', { id: param(c, 'id'), ...removed });
+    }),
+  );
+  api.post(
+    `${P}/draws/:id/mark`,
+    handler(async (c) => {
+      const input = await body(c);
+      const r = await draws.markDraw(c.env, c.get('club'), param(c, 'id'), input);
+      await log(c, 'draw.mark', { id: param(c, 'id'), userId: input.userId, entryId: input.entryId, field: input.field, value: !!input.value });
+      return r;
+    }),
+  );
+  api.post(
+    `${P}/draws/:id/outside`,
+    handler(async (c) => {
+      const r = await draws.addOutsideEntries(c.env, c.get('club'), param(c, 'id'), await body(c));
+      await log(c, 'draw.addOutside', { id: param(c, 'id'), names: r.added });
+      return r;
+    }),
+  );
+  api.post(
+    `${P}/draws/:id/outside/:eid/remove`,
+    handler(async (c) => {
+      const name = await draws.removeOutsideEntry(c.env, c.get('club'), param(c, 'id'), param(c, 'eid'));
+      await log(c, 'draw.removeOutside', { id: param(c, 'id'), entryId: param(c, 'eid'), name });
     }),
   );
 

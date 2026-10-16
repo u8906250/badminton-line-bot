@@ -718,7 +718,8 @@ export async function deleteClub(env: Env, club: Club, actorRole: Role, confirmN
             (SELECT COUNT(*) FROM seasons WHERE club_id = ?1) AS seasons,
             (SELECT COUNT(*) FROM sessions WHERE club_id = ?1) AS sessions,
             (SELECT COUNT(*) FROM registrations WHERE session_id IN (SELECT id FROM sessions WHERE club_id = ?1)) AS registrations,
-            (SELECT COUNT(*) FROM ledger_entries WHERE club_id = ?1) AS ledgerEntries`,
+            (SELECT COUNT(*) FROM ledger_entries WHERE club_id = ?1) AS ledgerEntries,
+            (SELECT COUNT(*) FROM draws WHERE club_id = ?1) AS draws`,
   )
     .bind(club.id)
     .first<Record<string, number>>();
@@ -731,6 +732,8 @@ export async function deleteClub(env: Env, club: Club, actorRole: Role, confirmN
     del('DELETE FROM seasons WHERE club_id = ?'),
     del('DELETE FROM schedules WHERE club_id = ?'),
     del('DELETE FROM ledger_entries WHERE club_id = ?'),
+    del('DELETE FROM draw_entries WHERE draw_id IN (SELECT id FROM draws WHERE club_id = ?)'),
+    del('DELETE FROM draws WHERE club_id = ?'),
     del('DELETE FROM club_members WHERE club_id = ?'),
     del('DELETE FROM clubs WHERE id = ?'),
     env.DB.prepare(

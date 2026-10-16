@@ -4,8 +4,8 @@ import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import type { Gender, Session } from './types';
 import { UserError, isAdmin } from './types';
-import { verifyIdToken } from './line';
-import { getClubAndRole, getSession, upsertUser } from './db';
+import { getGroupMemberProfile, verifyIdToken } from './line';
+import { ensureMember, getClubAndRole, getSession, upsertUser } from './db';
 import * as svc from './service';
 import { pushPromoted } from './notify';
 import { registerAdminRoutes } from './admin';
@@ -69,9 +69,17 @@ api.use('*', async (c, next) => {
 });
 
 api.use('/clubs/:clubId/*', async (c, next) => {
-  const { club, role } = await getClubAndRole(c.env.DB, c.req.param('clubId') ?? '', c.get('userId'));
+  const { club, role: known } = await getClubAndRole(c.env.DB, c.req.param('clubId') ?? '', c.get('userId'));
   if (!club) return c.json({ error: '找不到這個球團' }, 404);
-  if (!role) return c.json({ error: '你還不是這個球團的成員，請先在群組輸入「選單」' }, 403);
+  let role = known;
+  if (!role) {
+    // 還沒在群組傳過訊息的人：向 LINE 確認他確實在這個球團的群組裡，是的話直接加成成員（不在群組裡的人拿到連結也進不來）
+    const profile = await getGroupMemberProfile(c.env, club.line_group_id, c.get('userId'));
+    if (!profile) return c.json({ error: '你不在這個球團的 LINE 群組裡，請先加入群組再打開報名頁' }, 403);
+    await upsertUser(c.env.DB, { id: c.get('userId'), displayName: profile.displayName, pictureUrl: profile.pictureUrl });
+    await ensureMember(c.env.DB, club.id, c.get('userId'));
+    role = 'member';
+  }
   c.set('club', club);
   c.set('role', role);
   await next();
