@@ -23,7 +23,8 @@ function formatterFor(tz: string): Intl.DateTimeFormat {
   return f;
 }
 
-function partsIn(ts: number, tz: string): Record<string, string> {
+/** 某一瞬間在該時區的年月日時分秒（字串，兩位數補零）。 */
+export function partsIn(ts: number, tz: string): Record<string, string> {
   const p: Record<string, string> = {};
   for (const x of formatterFor(tz).formatToParts(new Date(ts))) p[x.type] = x.value;
   return p;

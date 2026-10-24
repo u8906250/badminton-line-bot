@@ -7,6 +7,7 @@ import { type AppEnv, body, handler } from './http';
 import * as m from './manage';
 import * as ledger from './ledger';
 import * as draws from './draws';
+import { rosterText } from './rostertext';
 import { cancelSession, roster } from './service';
 import { pushBudget } from './line';
 import { pushChanges, pushText, sessionLabel } from './notify';
@@ -196,6 +197,14 @@ export function registerAdminRoutes(api: Hono<AppEnv>): void {
       await log(c, 'season.fee', { id: param(c, 'id'), userId: param(c, 'uid'), paid: !!paid });
     }),
   );
+  api.post(
+    `${P}/seasons/:id/members/:uid/exempt`,
+    handler(async (c) => {
+      const { exempt } = await body(c);
+      await m.setSeasonFeeExempt(c.env, c.get('club'), param(c, 'id'), param(c, 'uid'), !!exempt);
+      await log(c, 'season.feeExempt', { id: param(c, 'id'), userId: param(c, 'uid'), exempt: !!exempt });
+    }),
+  );
 
   // ---- 抽籤紀錄（規則在 draws.ts）----
   api.get(`${P}/draws`, handler(async (c) => ({ draws: await draws.listDraws(c.env, c.get('club')) })));
@@ -334,6 +343,8 @@ export function registerAdminRoutes(api: Hono<AppEnv>): void {
       return { ...r, casualFee: c.get('club').casual_fee, casualFeeFemale: c.get('club').casual_fee_female };
     }),
   );
+  // 文字名單：複製貼到群組用（格式在 rostertext.ts）
+  api.get(`${P}/sessions/:sid/text`, handler(async (c) => ({ text: await rosterText(c.env, c.get('club'), param(c, 'sid')) })));
   api.post(
     `${P}/sessions/:sid/attendance/:rid`,
     handler(async (c) => {

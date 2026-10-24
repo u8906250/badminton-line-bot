@@ -196,13 +196,29 @@ assert.ok(coach.userId.startsWith('ext_'));
 assert.equal(coach.name, '王教練');
 assert.equal(q(`SELECT display_name FROM users WHERE line_user_id=?`, coach.userId)[0].display_name, '王教練');
 assert.equal(q(`SELECT role FROM club_members WHERE club_id='c1' AND user_id=?`, coach.userId)[0].role, 'member');
-// 不收季費；LINE 上的成員照常
+// 免季費由管理員設定：加入時和其他人一樣要繳（不在 LINE 上也一樣）
 const exemptOf = (uid: string) => q(`SELECT fee_exempt FROM season_members WHERE season_id=? AND user_id=?`, se.id, uid)[0].fee_exempt;
-assert.deepEqual([exemptOf(coach.userId), exemptOf('U1')], [1, 0]);
-await assert.rejects(m.setSeasonFeePaid(env, club(), se.id, coach.userId, true), isUserError(/不收季費/));
+assert.deepEqual([exemptOf(coach.userId), exemptOf('U1')], [0, 0]);
+await m.setSeasonFeeExempt(env, club(), se.id, coach.userId, true);
+assert.equal(exemptOf(coach.userId), 1);
+await assert.rejects(m.setSeasonFeePaid(env, club(), se.id, coach.userId, true), isUserError(/設定為免季費/));
 const seView = (await m.listSeasons(env, club()))[0].members;
 assert.deepEqual(seView.filter((x: any) => x.feeExempt || x.external).map((x: any) => [x.name, x.feeExempt, x.external]), [['王教練', true, true]]);
 assert.equal(seView.find((x: any) => x.userId === 'U1').feeExempt, false);
+// LINE 上的成員也能設免季費；已經勾已繳的要先取消已繳；取消免季費後又可以勾已繳
+await m.setSeasonFeePaid(env, club(), se.id, 'U1', true);
+await assert.rejects(m.setSeasonFeeExempt(env, club(), se.id, 'U1', true), isUserError(/先取消「已繳」/));
+assert.equal(exemptOf('U1'), 0);
+await m.setSeasonFeePaid(env, club(), se.id, 'U1', false);
+await m.setSeasonFeeExempt(env, club(), se.id, 'U1', true);
+assert.equal(exemptOf('U1'), 1);
+await m.setSeasonFeeExempt(env, club(), se.id, 'U1', false);
+await m.setSeasonFeePaid(env, club(), se.id, 'U1', true);
+assert.deepEqual([exemptOf('U1'), q(`SELECT fee_paid FROM season_members WHERE season_id=? AND user_id='U1'`, se.id)[0].fee_paid], [0, 1]);
+await m.setSeasonFeePaid(env, club(), se.id, 'U1', false);
+// 不在名單上的人、別的季期
+await assert.rejects(m.setSeasonFeeExempt(env, club(), se.id, 'U-nobody', true), isUserError(/不在這季的季打名單上/));
+await assert.rejects(m.setSeasonFeeExempt(env, club(), 'nope', 'U1', true), isUserError(/找不到這個季期/));
 // 佔一個季打名額：滿的那場，最後報名的臨打（丙）退回候補
 assert.deepEqual([reg(sid3, coach.userId).kind, reg(sid3, coach.userId).status], ['season', 'confirmed']);
 assert.deepEqual(coach.changes.demoted.filter((x: any) => x.session.id === sid3).map((x: any) => x.p.user_id), ['U3']);

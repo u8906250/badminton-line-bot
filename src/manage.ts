@@ -316,7 +316,7 @@ async function getSeason(env: Env, club: Club, seasonId: string): Promise<Season
   return se;
 }
 
-/** 加入季打成員，並立即在這季未開打的場次佔位（超額時退回最後報名的臨打）。不在 LINE 上的人不收季費。 */
+/** 加入季打成員，並立即在這季未開打的場次佔位（超額時退回最後報名的臨打）。一律要繳季費，免季費由管理員另外勾（setSeasonFeeExempt）。 */
 export async function addSeasonMembers(
   env: Env,
   club: Club,
@@ -332,7 +332,7 @@ export async function addSeasonMembers(
   }
   await env.DB.batch(
     userIds.map((uid) =>
-      env.DB.prepare('INSERT OR IGNORE INTO season_members (season_id, user_id, fee_exempt) VALUES (?, ?, ?)').bind(se.id, uid, isExternal(uid) ? 1 : 0),
+      env.DB.prepare('INSERT OR IGNORE INTO season_members (season_id, user_id) VALUES (?, ?)').bind(se.id, uid),
     ),
   );
 
@@ -366,7 +366,7 @@ export async function addSeasonMembers(
 }
 
 /**
- * 把不在 LINE 上的人（例如教練）加進季打：佔一個季打名額、出現在名單上，不收季費。
+ * 把不在 LINE 上的人（例如教練）加進季打：佔一個季打名額、出現在名單上。和其他人一樣預設要繳季費，不收的話由管理員勾「免季費」。
  * 球團裡已經有同名的非 LINE 成員就沿用，沒有才建立。
  */
 export async function addExternalSeasonMember(
@@ -427,9 +427,25 @@ export async function setSeasonFeePaid(env: Env, club: Club, seasonId: string, u
   const sm = await env.DB.prepare('SELECT fee_exempt FROM season_members WHERE season_id = ? AND user_id = ?')
     .bind(se.id, userId)
     .first<{ fee_exempt: number }>();
-  if (sm?.fee_exempt) throw new UserError('這位不收季費');
+  if (sm?.fee_exempt) throw new UserError('這位設定為免季費；要收季費的話，先取消「免季費」');
   await env.DB.prepare('UPDATE season_members SET fee_paid = ?, paid_at = ? WHERE season_id = ? AND user_id = ?')
     .bind(paid ? 1 : 0, paid ? nowIso() : null, se.id, userId)
+    .run();
+}
+
+/**
+ * 設定某位季打成員這一季免季費（例如教練、幹部），由管理員決定，LINE 上或不在 LINE 上的人都可以。
+ * 免季費的人記帳時已繳、未繳都不算。已經勾了已繳的人不能直接設成免季費，免得收過的錢從帳上消失。
+ */
+export async function setSeasonFeeExempt(env: Env, club: Club, seasonId: string, userId: string, exempt: boolean): Promise<void> {
+  const se = await getSeason(env, club, seasonId);
+  const sm = await env.DB.prepare('SELECT fee_paid FROM season_members WHERE season_id = ? AND user_id = ?')
+    .bind(se.id, userId)
+    .first<{ fee_paid: number }>();
+  if (!sm) throw new UserError('這位不在這季的季打名單上');
+  if (exempt && sm.fee_paid) throw new UserError('這位已經勾了已繳；要設成免季費，先取消「已繳」');
+  await env.DB.prepare('UPDATE season_members SET fee_exempt = ? WHERE season_id = ? AND user_id = ?')
+    .bind(exempt ? 1 : 0, se.id, userId)
     .run();
 }
 

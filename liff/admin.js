@@ -203,7 +203,8 @@
           ${se.members.map((m) => `
             <div class="item"><span>${esc(m.name)}${m.external ? '<span class="hint">（非 LINE）</span>' : ''}</span>
               <span class="check">
-                ${m.feeExempt ? '<span class="hint">免季費</span>' : `<label class="check"><input type="checkbox" data-change="aSeasonFee" data-season="${esc(se.id)}" data-uid="${esc(m.userId)}" ${m.feePaid ? 'checked' : ''}>已繳</label>`}
+                ${m.feeExempt ? '' : `<label class="check"><input type="checkbox" data-change="aSeasonFee" data-season="${esc(se.id)}" data-uid="${esc(m.userId)}" ${m.feePaid ? 'checked' : ''}>已繳</label>`}
+                <label class="check"><input type="checkbox" data-change="aSeasonExempt" data-season="${esc(se.id)}" data-uid="${esc(m.userId)}" ${m.feeExempt ? 'checked' : ''}>免季費</label>
                 <button class="small" data-act="aSeasonRemove" data-season="${esc(se.id)}" data-uid="${esc(m.userId)}" data-name="${esc(m.name)}">移出</button>
               </span></div>`).join('') || '<div class="empty">還沒有季打成員</div>'}
         </div>
@@ -219,7 +220,7 @@
           <summary>＋ 加入不在 LINE 上的人（例如教練）</summary>
           <form class="grid" data-form="aSeasonAddExternal" data-season="${esc(se.id)}">
             ${field('名字', input('name', '', 'maxlength="20" required'), true)}
-            <div class="full hint">會佔一個季打名額、出現在名單上，不收季費。他沒辦法自己操作，請假、銷假由管理員到「場次 → 名單管理」代為處理。</div>
+            <div class="full hint">會佔一個季打名額、出現在名單上，和其他人一樣要繳季費；不收的話，加入後在名單上勾「免季費」。他沒辦法自己操作，請假、銷假由管理員代為處理（報名頁的場次卡片或「場次 → 名單管理」）。</div>
             <div class="full"><button class="primary" type="submit">加入</button></div>
           </form>
         </details>
@@ -270,6 +271,7 @@
     toast(`已加入 ${name}${changesText(r)}`);
   };
   App.changes.aSeasonFee = (el, d) => A(`/seasons/${enc(d.season)}/members/${enc(d.uid)}/fee`, { paid: el.checked });
+  App.changes.aSeasonExempt = (el, d) => A(`/seasons/${enc(d.season)}/members/${enc(d.uid)}/exempt`, { exempt: el.checked });
   App.actions.aSeasonRemove = async (d) => {
     if (!confirm(`把 ${d.name} 移出這季？還沒開打的場次會取消他的名額。`)) return;
     const r = await A(`/seasons/${enc(d.season)}/members/${enc(d.uid)}/remove`, {});

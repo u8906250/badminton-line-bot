@@ -19,6 +19,7 @@ const App = {
   tabs: [],    // 第一層分頁：{ view, label, show: () => boolean }
   subtabs: {}, // 第一層 view → [{ view, label }]
   parentOf: {}, // 細節頁 → 所屬的分頁（例如點名頁屬於場次）
+  KEEP: Symbol('keep'), // 動作回傳這個值時不重畫畫面
 };
 
 const STATUS = { scheduled: '尚未開放', open: '報名中', closed: '已截止', cancelled: '已取消', done: '已結束' };
@@ -269,6 +270,71 @@ function rosterList(title, items, markCasual, compact) {
 }
 
 /** 報名中、已截止的場次：名單直接展開在卡片裡。joining = 按了「我要報名」，正在填報名欄位。 */
+// ---------- 管理員在報名頁上的操作：代季打請假／銷假、匯出文字名單 ----------
+
+const meAdmin = () => !!App.state.me?.isAdmin;
+
+/** 管理員代季打請假、銷假的清單（收合著，剛操作過的那一場保持展開）。 */
+function seasonLeaveBlock(s, r) {
+  if (!meAdmin() || !r || s.status === 'cancelled' || s.status === 'done') return '';
+  const season = [...r.confirmed, ...r.waitlist, ...r.leave].filter((e) => e.kind === 'season');
+  if (!season.length) return '';
+  const sid = esc(s.id);
+  const row = (e) => `
+    <div class="item"><span>${esc(e.name)}${e.status === 'leave' ? ' <span class="hint">請假中</span>' : e.status === 'waitlist' ? ' <span class="hint">候補</span>' : ''}</span>
+      ${e.status === 'leave'
+        ? `<button class="small" data-act="adminUnleave" data-sid="${sid}" data-rid="${esc(e.id)}" data-name="${esc(e.name)}">銷假</button>`
+        : `<button class="small" data-act="adminLeave" data-sid="${sid}" data-rid="${esc(e.id)}" data-name="${esc(e.name)}">請假</button>`}</div>`;
+  return `
+    <details class="fold" style="margin-top:12px" ${App.state.leaveOpen === s.id ? 'open' : ''}>
+      <summary>代季打請假／銷假（管理員）</summary>
+      <div class="mine">${season.map(row).join('')}</div>
+    </details>`;
+}
+
+App.actions.adminLeave = async (d) => {
+  if (!confirm(`幫 ${d.name} 請假？名額會釋出，候補第一位會遞補。`)) return;
+  App.state.leaveOpen = d.sid;
+  const r = await api(`/admin/sessions/${encodeURIComponent(d.sid)}/registrations/${encodeURIComponent(d.rid)}/cancel`, {});
+  toast(`已幫 ${d.name} 請假${changesText(r)}`);
+};
+App.actions.adminUnleave = async (d) => {
+  App.state.leaveOpen = d.sid;
+  const r = await api(`/admin/sessions/${encodeURIComponent(d.sid)}/registrations/${encodeURIComponent(d.rid)}/unleave`, {});
+  toast(r.status === 'confirmed' ? `已幫 ${d.name} 銷假：正取` : `已幫 ${d.name} 銷假，名額已滿，排入候補第 ${r.position} 位`);
+};
+
+/** 文字名單：產生後可以修改，再複製貼到群組。 */
+App.parentOf.export = 'list';
+App.actions.exportText = (d) => App.go('export', { sid: d.sid, back: App.state.view === 'roster' ? 'roster' : 'list' });
+App.views.export = async ({ sid, back }) => {
+  const { text: t } = await api(`/admin/sessions/${encodeURIComponent(sid)}/text`);
+  return `
+    <div><button data-act="back" data-view="${esc(back || 'list')}" data-sid="${back === 'roster' ? esc(sid) : ''}">← 返回</button></div>
+    <section class="card">
+      <h2>文字名單</h2>
+      <textarea id="exportText" rows="22">${esc(t)}</textarea>
+      <div class="hint" style="margin:8px 0">可以先在上面修改，再按「複製」貼到 LINE 群組。名單是按下匯出那一刻的狀態；之後有人報名或請假，請重新匯出。</div>
+      <div class="actions"><button class="primary" data-act="copyExport">複製</button></div>
+    </section>`;
+};
+App.actions.copyExport = async () => {
+  const el = $('exportText');
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(el.value);
+    ok = true;
+  } catch {
+    // 有些 LINE 內建瀏覽器不給用剪貼簿 API，改用選取再複製
+    try {
+      el.select();
+      ok = document.execCommand('copy');
+    } catch { /* 下面提示手動複製 */ }
+  }
+  toast(ok ? '已複製，貼到群組就可以了' : '無法自動複製，請長按文字框全選後複製');
+  return App.KEEP;
+};
+
 function sessionCard(s, joining) {
   const self = s.mine.find((r) => !r.guestName);
   const canJoin = s.status === 'open';
@@ -290,6 +356,7 @@ function sessionCard(s, joining) {
     if (canJoin && !self) buttons.push(`<button class="primary" data-act="join" data-sid="${sid}">${join}</button>`);
     if (canJoin) buttons.push(`<button data-act="guest" data-sid="${sid}" data-when="${esc(fmt(s.startAt))}">幫朋友報名</button>`);
     if (!s.roster) buttons.push(`<button data-act="roster" data-sid="${sid}">名單</button>`);
+    if (meAdmin() && s.status !== 'cancelled') buttons.push(`<button data-act="exportText" data-sid="${sid}">匯出文字名單</button>`);
     if (buttons.length) actions = `<div class="actions">${buttons.join('')}</div>`;
   }
   const r = s.roster;
@@ -304,6 +371,7 @@ function sessionCard(s, joining) {
     ${r ? `${rosterList('正取', r.confirmed, true, true)}
       ${r.waitlist.length ? rosterList('候補', r.waitlist, false, true) : ''}
       ${r.leave.length ? rosterList('請假', r.leave, false, true) : ''}` : ''}
+    ${seasonLeaveBlock(s, r)}
   </section>`;
 }
 
@@ -373,6 +441,8 @@ App.views.roster = async ({ sid }) => {
       ${rosterList('正取', r.confirmed, true)}
       ${rosterList('候補', r.waitlist, false)}
       ${r.leave.length ? rosterList('請假', r.leave, false) : ''}
+      ${meAdmin() && s.status !== 'cancelled' ? `<div class="actions"><button data-act="exportText" data-sid="${esc(s.id)}">匯出文字名單</button></div>` : ''}
+      ${seasonLeaveBlock(s, r)}
     </section>`;
 };
 
@@ -438,7 +508,11 @@ document.addEventListener('click', async (ev) => {
   if (!fn) return;
   btn.disabled = true;
   try {
-    await fn({ ...btn.dataset });
+    // 回傳 App.KEEP 的動作不重畫畫面（例如複製文字名單，重畫會蓋掉剛改過的文字）
+    if ((await fn({ ...btn.dataset })) === App.KEEP) {
+      btn.disabled = false;
+      return;
+    }
   } catch (e) {
     toast(e.message);
   }
